@@ -8,15 +8,12 @@
 use crate::crd::v1::PgOprSpec;
 use crate::crd::v1::pgopr;
 use crate::k8s;
+use crate::local_config::load_config;
 use kube::{
     Api, Client,
     api::{DeleteParams, Patch, PatchParams, PostParams},
 };
 use log::error;
-
-const DEFAULT_CLUSTER_NAME: &str = "postgresql";
-const DEFAULT_NAMESPACE: &str = "default";
-const DEFAULT_STORAGE_GI: u32 = 5;
 
 /// Orchestrates the installation of the operator and its CRDs.
 pub async fn handle_install() {
@@ -39,18 +36,20 @@ pub async fn handle_uninstall() {
 /// - `name` - Name of the PgOpr resource to create.
 /// - `namespace` - Namespace where the PgOpr resource resides.
 /// - `replicas` - Desired number of replicas.
+/// - `storage` - Desired storage size.
 async fn create_cluster(
     client: Client,
     name: &str,
     namespace: &str,
     replicas: u32,
+    storage: u32,
 ) -> Result<pgopr, crate::Error> {
     let api: Api<pgopr> = Api::namespaced(client, namespace);
     let mut cluster = pgopr::new(
         name,
         PgOprSpec {
             version: None,
-            storage: DEFAULT_STORAGE_GI,
+            storage,
             replicas: Some(replicas),
             resources: None,
             config: None,
@@ -104,13 +103,26 @@ async fn get_cluster(client: Client, name: &str, namespace: &str) -> Result<pgop
 /// Provisions the primary database components through a PgOpr resource.
 pub async fn handle_provision_primary() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(_) => {}
         Err(crate::Error::KubeError { source }) => match source {
             kube::Error::Api(err) if err.code == 404 => {
-                if let Err(err) =
-                    create_cluster(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, 0).await
+                if let Err(err) = create_cluster(
+                    client,
+                    &local_cfg.cluster_name,
+                    &local_cfg.namespace,
+                    0,
+                    local_cfg.default_storage,
+                )
+                .await
                 {
                     error!("Unable to create PgOpr resource: {:?}", err);
                 }
@@ -124,20 +136,27 @@ pub async fn handle_provision_primary() {
 /// Provisions pgmoneta through the PgOpr resource.
 pub async fn handle_provision_pgmoneta() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(_) => {
-            let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+            let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
             let patch = serde_json::json!({
                 "spec": {
                     "pgmoneta": {
-                        "storage": 10
+                        "storage": local_cfg.default_pgmoneta_storage
                     }
                 }
             });
             if let Err(err) = api
                 .patch(
-                    DEFAULT_CLUSTER_NAME,
+                    &local_cfg.cluster_name,
                     &PatchParams::default(),
                     &Patch::Merge(&patch),
                 )
@@ -148,8 +167,14 @@ pub async fn handle_provision_pgmoneta() {
         }
         Err(crate::Error::KubeError { source }) => match source {
             kube::Error::Api(err) if err.code == 404 => {
-                if let Err(err) =
-                    create_cluster(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, 0).await
+                if let Err(err) = create_cluster(
+                    client,
+                    &local_cfg.cluster_name,
+                    &local_cfg.namespace,
+                    0,
+                    local_cfg.default_storage,
+                )
+                .await
                 {
                     error!("Unable to create PgOpr resource: {:?}", err);
                 }
@@ -159,13 +184,21 @@ pub async fn handle_provision_pgmoneta() {
         Err(err) => error!("Unable to get PgOpr resource: {:?}", err),
     }
 }
+
 /// Provisions pgexporter through the PgOpr resource.
 pub async fn handle_provision_pgexporter() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(_) => {
-            let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+            let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
             let patch = serde_json::json!({
                 "spec": {
                     "pgexporter": {}
@@ -173,7 +206,7 @@ pub async fn handle_provision_pgexporter() {
             });
             if let Err(err) = api
                 .patch(
-                    DEFAULT_CLUSTER_NAME,
+                    &local_cfg.cluster_name,
                     &PatchParams::default(),
                     &Patch::Merge(&patch),
                 )
@@ -184,8 +217,14 @@ pub async fn handle_provision_pgexporter() {
         }
         Err(crate::Error::KubeError { source }) => match source {
             kube::Error::Api(err) if err.code == 404 => {
-                if let Err(err) =
-                    create_cluster(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, 0).await
+                if let Err(err) = create_cluster(
+                    client,
+                    &local_cfg.cluster_name,
+                    &local_cfg.namespace,
+                    0,
+                    local_cfg.default_storage,
+                )
+                .await
                 {
                     error!("Unable to create PgOpr resource: {:?}", err);
                 }
@@ -199,8 +238,9 @@ pub async fn handle_provision_pgexporter() {
 /// Retires pgexporter through the PgOpr resource.
 pub async fn handle_retire_pgexporter() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+    let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
     let patch = serde_json::json!({
         "spec": {
             "pgexporter": null
@@ -208,7 +248,7 @@ pub async fn handle_retire_pgexporter() {
     });
     if let Err(err) = api
         .patch(
-            DEFAULT_CLUSTER_NAME,
+            &local_cfg.cluster_name,
             &PatchParams::default(),
             &Patch::Merge(&patch),
         )
@@ -221,8 +261,9 @@ pub async fn handle_retire_pgexporter() {
 /// Retires pgmoneta through the PgOpr resource.
 pub async fn handle_retire_pgmoneta() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+    let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
     let patch = serde_json::json!({
         "spec": {
             "pgmoneta": null
@@ -230,7 +271,7 @@ pub async fn handle_retire_pgmoneta() {
     });
     if let Err(err) = api
         .patch(
-            DEFAULT_CLUSTER_NAME,
+            &local_cfg.cluster_name,
             &PatchParams::default(),
             &Patch::Merge(&patch),
         )
@@ -243,10 +284,17 @@ pub async fn handle_retire_pgmoneta() {
 /// Provisions pgexporter monitoring (Grafana + Prometheus) through the PgOpr resource.
 pub async fn handle_provision_grafana() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(_) => {
-            let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+            let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
             let patch = serde_json::json!({
                 "spec": {
                     "pgexporter": {
@@ -256,7 +304,7 @@ pub async fn handle_provision_grafana() {
             });
             if let Err(err) = api
                 .patch(
-                    DEFAULT_CLUSTER_NAME,
+                    &local_cfg.cluster_name,
                     &PatchParams::default(),
                     &Patch::Merge(&patch),
                 )
@@ -280,8 +328,9 @@ pub async fn handle_provision_grafana() {
 /// Retires pgexporter monitoring (Grafana + Prometheus) through the PgOpr resource.
 pub async fn handle_retire_grafana() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+    let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
     let patch = serde_json::json!({
         "spec": {
             "pgexporter": {
@@ -291,7 +340,7 @@ pub async fn handle_retire_grafana() {
     });
     if let Err(err) = api
         .patch(
-            DEFAULT_CLUSTER_NAME,
+            &local_cfg.cluster_name,
             &PatchParams::default(),
             &Patch::Merge(&patch),
         )
@@ -304,11 +353,12 @@ pub async fn handle_retire_grafana() {
 /// Removes the primary database components through the PgOpr resource.
 pub async fn handle_retire_primary() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    let api: Api<pgopr> = Api::namespaced(client, DEFAULT_NAMESPACE);
+    let api: Api<pgopr> = Api::namespaced(client, &local_cfg.namespace);
 
     match api
-        .delete(DEFAULT_CLUSTER_NAME, &DeleteParams::default())
+        .delete(&local_cfg.cluster_name, &DeleteParams::default())
         .await
     {
         Ok(_) => {}
@@ -322,20 +372,38 @@ pub async fn handle_retire_primary() {
 /// Provisions the replica database components through a PgOpr resource.
 pub async fn handle_provision_replica() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(current) => {
             let replicas = current.spec.replicas.unwrap_or(0) + 1;
-            if let Err(err) =
-                patch_replicas(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, replicas).await
+            if let Err(err) = patch_replicas(
+                client,
+                &local_cfg.cluster_name,
+                &local_cfg.namespace,
+                replicas,
+            )
+            .await
             {
                 error!("Unable to patch PgOpr replicas: {:?}", err);
             }
         }
         Err(crate::Error::KubeError { source }) => match source {
             kube::Error::Api(err) if err.code == 404 => {
-                if let Err(err) =
-                    create_cluster(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, 1).await
+                if let Err(err) = create_cluster(
+                    client,
+                    &local_cfg.cluster_name,
+                    &local_cfg.namespace,
+                    1,
+                    local_cfg.default_storage,
+                )
+                .await
                 {
                     error!("Unable to create PgOpr resource: {:?}", err);
                 }
@@ -349,12 +417,24 @@ pub async fn handle_provision_replica() {
 /// Removes the replica database components through a PgOpr resource.
 pub async fn handle_retire_replica() {
     super::print_header();
+    let local_cfg = load_config();
     let client: Client = k8s::k8s_client().await;
-    match get_cluster(client.clone(), DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE).await {
+    match get_cluster(
+        client.clone(),
+        &local_cfg.cluster_name,
+        &local_cfg.namespace,
+    )
+    .await
+    {
         Ok(current) => {
             let replicas = current.spec.replicas.unwrap_or(0).saturating_sub(1);
-            if let Err(err) =
-                patch_replicas(client, DEFAULT_CLUSTER_NAME, DEFAULT_NAMESPACE, replicas).await
+            if let Err(err) = patch_replicas(
+                client,
+                &local_cfg.cluster_name,
+                &local_cfg.namespace,
+                replicas,
+            )
+            .await
             {
                 error!("Unable to patch PgOpr replicas: {:?}", err);
             }

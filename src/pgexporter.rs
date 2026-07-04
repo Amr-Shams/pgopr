@@ -20,7 +20,6 @@ use k8s_openapi::{
 };
 use kube::api::ObjectMeta;
 use std::collections::BTreeMap;
-use std::fs;
 /// Builds a secret containing the pgexporter password
 ///
 /// # Arguments
@@ -47,18 +46,6 @@ pub fn build_secret(name: &str, namespace: &str, exporter_password: &str) -> Sec
         string_data: Some(string_data),
         ..Secret::default()
     }
-}
-
-pub fn pgexporter_generate() {
-    let data = serde_yaml::to_string(&build_deployment(
-        "postgresql-pgexporter",
-        "default",
-        "postgresql",
-        "postgresql-pgexporter-secret",
-        None,
-    ))
-    .expect("Can't serialize...");
-    fs::write("pgopr-pgexporter.yaml", data).expect("...");
 }
 
 /// Builds a pgexporter deployment object

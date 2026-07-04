@@ -8,6 +8,7 @@
 
 pub mod cluster;
 pub mod generate;
+pub mod local_config;
 pub mod operator;
 
 use clap::{crate_description, crate_name, crate_version};

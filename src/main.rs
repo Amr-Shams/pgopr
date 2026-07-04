@@ -23,6 +23,7 @@ pub mod crd;
 mod finalizer;
 pub mod handlers;
 mod k8s;
+pub mod local_config;
 mod manager;
 mod persistent;
 mod pgexporter;
@@ -138,6 +139,26 @@ fn cli() -> Command {
                 .display_order(4),
         )
         .subcommand(
+            Command::new("config")
+                .about("Manage local configuration options")
+                .display_order(5)
+                .arg_required_else_help(true)
+                .subcommand(
+                    Command::new("show").about("Display current local configuration values"),
+                )
+                .subcommand(
+                    Command::new("set")
+                        .about("Set a local configuration value")
+                        .arg_required_else_help(true)
+                        .arg(
+                            Arg::new("key")
+                                .required(true)
+                                .help("The config key (e.g. cluster_name)"),
+                        )
+                        .arg(Arg::new("value").required(true).help("The config value")),
+                ),
+        )
+        .subcommand(
             Command::new("completion")
                 .about("Generate a shell completion file")
                 .display_order(997)
@@ -237,6 +258,10 @@ async fn main() {
 
         Some(("uninstall", _)) => {
             handlers::cluster::handle_uninstall().await;
+        }
+
+        Some(("config", sub_matches)) => {
+            handlers::local_config::handle_config(sub_matches).await;
         }
 
         _ => {
