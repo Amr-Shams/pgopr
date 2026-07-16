@@ -8,6 +8,7 @@
 
 pub mod cluster;
 pub mod generate;
+pub mod init;
 pub mod local_config;
 pub mod operator;
 

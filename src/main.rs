@@ -66,6 +66,13 @@ fn cli() -> Command {
         .after_help(
             "pgopr: https://pgopr.github.io/\nReport bugs: https://github.com/pgopr/pgopr/issues",
         )
+        .arg(
+            Arg::new("init")
+                .short('i')
+                .long("init")
+                .action(clap::ArgAction::SetTrue)
+                .help("Interactively create the pgopr configuration file and exit"),
+        )
         .subcommand(
             Command::new("install")
                 .about("Install the operator")
@@ -174,7 +181,7 @@ fn cli() -> Command {
         .subcommand(
             Command::new("generate")
                 .about("Generate YAML resources")
-                .display_order(998)
+                .display_order(999)
                 .arg(
                     Arg::new("type")
                         .short('t')
@@ -216,6 +223,10 @@ async fn main() {
 
     init_log();
 
+    if clicmd.get_flag("init") {
+        handlers::init::handle_init().await;
+        return;
+    }
     match clicmd.subcommand() {
         Some(("completion", sub_matches)) => {
             if let Some(generator) = sub_matches.get_one::<Shell>("type") {
